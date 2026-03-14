@@ -2632,10 +2632,28 @@ function addFire() {
 
 function deleteFire(id) {
   const f = fires.find(x => x.id === id);
+  if (!f) return;
+
+  // Havadaki herhangi bir araç bu yangını kullanıyor mu kontrol et
+  const activeUsers = Object.entries(userCurrentStatus).filter(([uname, s]) => {
+    if (s.status !== 'airborne') return false;
+    // Bu kullanıcının son logunun yangını bu mu?
+    const lastLog = allLogs.find(l => l.username === uname);
+    return lastLog?.fire === id;
+  });
+
+  if (activeUsers.length > 0) {
+    const names = activeUsers.map(([, s]) => s.name || s.aircraft).join(', ');
+    showToast('🔒', 'Silinemez!', `${f.name} — ${names} şu an havada`, '#ff3d5a');
+    return;
+  }
+
   fires = fires.filter(x => x.id !== id);
   renderFireList();
   loadFireSelect();
-  showToast('🗑️', 'Silindi', f?.name || '', '#ff3d5a');
+  renderStatsCards();
+  if (db) fbFireUpdated();
+  showToast('🗑️', 'Silindi', f.name, '#ff3d5a');
 }
 
 function renderFireList() {
