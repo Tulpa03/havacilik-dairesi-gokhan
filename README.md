@@ -1,1 +1,0 @@
-# havacilik-dairesi-gokhan
