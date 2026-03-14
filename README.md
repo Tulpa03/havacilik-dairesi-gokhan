@@ -1,1 +1,1 @@
-# havacilik-dairesi-g-khan
+# havacilik-dairesi-gokhan
