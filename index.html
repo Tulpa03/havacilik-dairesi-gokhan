@@ -3461,7 +3461,7 @@ function logIkmal() {
     mission: document.getElementById('mission-select')?.value || null
   };
   allLogs.unshift(ikmalLog);
-  if (db) db.ref(`logs/${ikmalLog.id}`).set({ ...ikmalLog, timestamp: ikmalLog.timestamp instanceof Date ? ikmalLog.timestamp.toISOString() : ikmalLog.timestamp });
+  if (db) db.ref(`logs/${ikmalLog.id}`).set(toFirebase(ikmalLog));
 
   updateUserLog();
   updateAdminPanel();
@@ -3501,7 +3501,7 @@ function logWater() {
     mission: document.getElementById('mission-select')?.value || null
   };
   allLogs.unshift(sortiLog);
-  if (db) db.ref(`logs/${sortiLog.id}`).set({ ...sortiLog, timestamp: sortiLog.timestamp instanceof Date ? sortiLog.timestamp.toISOString() : sortiLog.timestamp });
+  if (db) db.ref(`logs/${sortiLog.id}`).set(toFirebase(sortiLog));
 
   updateUserLog();
   updateAdminPanel();
@@ -3574,7 +3574,13 @@ function logEvent(type) {
 
   // Firebase'e direkt yaz
   if (db) {
-    const toSave = { ...log, timestamp: log.timestamp instanceof Date ? log.timestamp.toISOString() : log.timestamp };
+    const toSave = {
+      ...log,
+      timestamp: log.timestamp instanceof Date ? log.timestamp.toISOString() : log.timestamp,
+      waterOnLanding: log.waterOnLanding ?? null,
+      fire: log.fire ?? null,
+      mission: log.mission ?? null
+    };
     db.ref(`logs/${log.id}`).set(toSave);
     db.ref(`userStatus/${currentUser.username}`).set({
       ...userCurrentStatus[currentUser.username],
@@ -4539,11 +4545,19 @@ function fbRemove(path) {
 const _origUnshift = Array.prototype.unshift;
 // Bunun yerine her log ekleme noktasında fbPush çağrısı yapılır (aşağıda patch edilir)
 
+
+function toFirebase(obj) {
+  // undefined değerleri null'a çevir (Firebase undefined kabul etmez)
+  const clean = {};
+  for (const [k, v] of Object.entries(obj)) {
+    clean[k] = v === undefined ? null : (v instanceof Date ? v.toISOString() : v);
+  }
+  return clean;
+}
+
 function fbLogAdded(log) {
   if (!db) return;
-  // Timestamp Date objesini string'e çevir (JSON serializable)
-  const toSave = { ...log, timestamp: log.timestamp instanceof Date ? log.timestamp.toISOString() : log.timestamp };
-  fbPush(`logs/${log.id}`, toSave);
+  fbPush(`logs/${log.id}`, toFirebase(log));
 }
 
 function fbLogRemoved(logId) {
