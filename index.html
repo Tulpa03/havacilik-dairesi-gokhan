@@ -2063,6 +2063,17 @@
         <span class="btn-sublabel">Önce kalkış yapın</span>
         <div class="btn-hold-progress" id="hold-progress-landing"></div>
       </button>
+      <!-- ETA Butonu — kalkış/iniş altında tam genişlik -->
+      <button class="action-btn btn-eta" onclick="openEtaModal()">
+        <div class="btn-eta-left">
+          <span class="btn-eta-icon">🕐</span>
+          <div>
+            <div class="btn-eta-label">ETA</div>
+            <div class="btn-eta-sub">Tahmini varış saati</div>
+          </div>
+        </div>
+        <div class="btn-eta-value" id="eta-display">— : —</div>
+      </button>
       <button class="action-btn btn-water" id="sorti-btn" onclick="logWater()" disabled style="opacity:0.35;cursor:not-allowed">
         <div class="btn-water-left">
           <span class="btn-water-icon">✈️</span>
@@ -2084,17 +2095,6 @@
           <span class="water-count-num" id="ikmal-count-display">0</span>
           <span class="water-count-lbl">Bu Uçuşta</span>
         </div>
-      </button>
-      <!-- ETA Butonu -->
-      <button class="action-btn btn-eta" onclick="openEtaModal()">
-        <div class="btn-eta-left">
-          <span class="btn-eta-icon">🕐</span>
-          <div>
-            <div class="btn-eta-label">ETA</div>
-            <div class="btn-eta-sub">Tahmini varış saati</div>
-          </div>
-        </div>
-        <div class="btn-eta-value" id="eta-display">— : —</div>
       </button>
     </div>
 
