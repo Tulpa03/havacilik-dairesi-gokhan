@@ -3481,6 +3481,8 @@ function applyLogin(uname, user) {
     updateAdminPanel();
     loadUserAircraftSelect(uname);
     loadFireSelect();
+    // Admin girişinde günlük sıfırlama kontrolü yap
+    setTimeout(() => checkDailyReset(), 3000);
   } else if (user.role === 'izleyici') {
     document.getElementById('viewer-screen').style.display = 'block';
     renderViewerStats();
@@ -3923,16 +3925,25 @@ function archiveAndReset() {
   });
 }
 
+let dailyResetChecked = false; // Sadece bir kez çalışsın
+
 function checkDailyReset() {
   if (!db) return;
+  if (dailyResetChecked) return; // Zaten kontrol edildi
+  if (currentUser?.role !== 'admin') return; // Sadece admin sıfırlasın
+  dailyResetChecked = true;
+
   const todayKey = getTodayKey();
   db.ref('system/lastResetDate').once('value', snap => {
     const lastReset = snap.val();
     if (lastReset !== todayKey) {
       db.ref('system/lastResetDate').set(todayKey);
       if (lastReset) { // İlk çalıştırma değilse sıfırla
+        console.info('[Sıfırlama] Yeni gün, arşivleniyor:', lastReset);
         archiveAndReset();
       }
+    } else {
+      console.info('[Sıfırlama] Bugün zaten sıfırlandı:', todayKey);
     }
   });
 }
@@ -5235,14 +5246,14 @@ function loadArchiveDate(val) {
   });
 }
 
-// initFirebase'e checkDailyReset ekle
+// initFirebase başladıktan sonra arşiv tarihlerini yükle
 const _origFbSyncAll = fbSyncAll;
 fbSyncAll = function() {
   _origFbSyncAll();
   setTimeout(() => {
-    checkDailyReset();
     scheduleMidnightReset();
     loadArchiveDates();
+    // checkDailyReset applyLogin'de admin için çağrılır
   }, 2000);
 };
 
