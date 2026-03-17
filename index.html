@@ -4575,9 +4575,6 @@ function initFirebase() {
   console.info('[Firebase] apiKey:', FIREBASE_CONFIG.apiKey.substring(0,12) + '...');
   console.info('[Firebase] databaseURL:', FIREBASE_CONFIG.databaseURL);
 
-  // Demo modda da otomatik girişi dene
-  setTimeout(() => { if (!currentUser) tryAutoLogin(); }, 500);
-
   // Firebase SDK'yı dinamik yükle
   const sdkScript = document.createElement('script');
   sdkScript.src = 'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js';
@@ -4646,7 +4643,7 @@ function fbSyncAll() {
   if (!db) return;
   showConnectionStatus('syncing');
 
-  // Kullanıcılar — Firebase'dekini koru, asla üzerine yazma
+  // Önce kullanıcıları yükle, sonra diğer her şeyi yap
   db.ref('users').once('value', snap => {
     if (!snap.val()) {
       db.ref('users').set(USERS);
@@ -4654,25 +4651,33 @@ function fbSyncAll() {
       USERS = snap.val();
       console.info('[Firebase] Kullanıcılar yüklendi:', Object.keys(USERS).length);
     }
-    // Kullanıcılar yüklendikten sonra otomatik girişi dene
-    if (!currentUser) tryAutoLogin();
-  });
 
-  // Diğer veriler — sadece Firebase boşsa yaz
-  db.ref('callsigns').once('value', snap => {
-    if (!snap.val()) db.ref('callsigns').set(callsigns);
-  });
-  db.ref('fires').once('value', snap => {
-    if (!snap.val()) db.ref('fires').set({});
-  });
-  db.ref('logs').once('value', snap => {
-    if (!snap.val()) db.ref('logs').set({});
-  });
-  db.ref('userStatus').once('value', snap => {
-    if (!snap.val()) db.ref('userStatus').set({});
-  });
+    // Diğer verileri yükle
+    db.ref('callsigns').once('value', csSnap => {
+      if (!csSnap.val()) db.ref('callsigns').set(callsigns);
+      else callsigns = csSnap.val();
+    });
+    db.ref('fires').once('value', fSnap => {
+      if (!fSnap.val()) db.ref('fires').set({});
+      else { fires = Object.values(fSnap.val()); }
+    });
+    db.ref('logs').once('value', lSnap => {
+      if (!lSnap.val()) db.ref('logs').set({});
+    });
+    db.ref('userStatus').once('value', sSnap => {
+      if (!sSnap.val()) db.ref('userStatus').set({});
+    });
 
-  showConnectionStatus('online');
+    showConnectionStatus('online');
+
+    // Kullanıcılar yüklendikten sonra otomatik giriş dene
+    if (!currentUser) {
+      const didLogin = tryAutoLogin();
+      if (didLogin) {
+        console.info('[Firebase] Otomatik giriş başarılı');
+      }
+    }
+  });
 }
 
 // ── Firebase'den canlı dinle ─────────────────────────────────
@@ -4773,9 +4778,7 @@ function fbListenAll() {
 }
 
 function fbFetchUserData() {
-  // Kullanıcı giriş yapınca tek seferlik veri çek, sonra bağlantıyı kes
   if (!db) return;
-  showConnectionStatus('syncing');
 
   Promise.all([
     db.ref('logs').once('value'),
@@ -4783,7 +4786,6 @@ function fbFetchUserData() {
     db.ref('fires').once('value'),
     db.ref('callsigns').once('value'),
   ]).then(([logsSnap, statusSnap, firesSnap, csSnap]) => {
-    // Loglar
     const logsData = logsSnap.val();
     if (logsData) {
       const remote = Object.values(logsData).sort((a,b) => b.id - a.id);
@@ -4792,17 +4794,11 @@ function fbFetchUserData() {
       updateUserLog();
       updateSortiButton();
     }
-    // Status
     if (statusSnap.val()) userCurrentStatus = statusSnap.val();
-    // Yangınlar
     if (firesSnap.val()) { fires = Object.values(firesSnap.val()); loadFireSelect(); }
-    // Çağrı adları
-    if (csSnap.val()) { callsigns = csSnap.val(); loadUserAircraftSelect(currentUser.username); }
+    if (csSnap.val()) { callsigns = csSnap.val(); if (currentUser) loadUserAircraftSelect(currentUser.username); }
 
-    // Veri çekildi, bağlantıyı kes (eş zamanlı bağlantı sayısını düşür)
-    db.goOffline();
-    showConnectionStatus('offline');
-    console.info('[Firebase] Veriler yüklendi, bağlantı kesildi (uçuş başlayınca tekrar açılacak)');
+    console.info('[Firebase] Kullanıcı verileri yüklendi');
   }).catch(e => {
     console.error('[Firebase] Veri çekme hatası:', e);
   });
