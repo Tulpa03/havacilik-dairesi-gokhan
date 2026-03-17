@@ -2022,11 +2022,11 @@
         <span class="btn-icon">⬇️</span><span class="btn-label" style="font-size:15px;letter-spacing:2px">İNİŞ</span>
         <span class="btn-sublabel">Önce kalkış yapın</span>
       </button>
-      <button class="action-btn btn-water" onclick="logWater()">
+      <button class="action-btn btn-water" id="sorti-btn" onclick="logWater()" disabled style="opacity:0.35;cursor:not-allowed">
         <div class="btn-water-left">
           <span class="btn-water-icon">✈️</span>
           <span class="btn-water-label">Sorti</span>
-          <span class="btn-water-sub">Her tıklama 1 sorti</span>
+          <span class="btn-water-sub" id="sorti-sublabel">Önce kalkış yapın</span>
         </div>
         <div class="water-counter">
           <span class="water-count-num" id="water-count-display">0</span>
@@ -3314,6 +3314,7 @@ function loadUserAircraftSelect(uname) {
 
   onAircraftChange();
   updateFlightButtons();
+  updateSortiButton();
 }
 
 function onCallsignPick(csName) {
@@ -3427,7 +3428,7 @@ function onAircraftChange() {
 
   savedAircraft = aircraft; // seçimi kaydet
 
-  if (!aircraft) { infoEl.style.display = 'none'; return; }
+  if (!aircraft) { infoEl.style.display = 'none'; updateSortiButton(); return; }
 
   const foundCs = Object.values(callsigns).find(cs => cs.tails.includes(aircraft));
 
@@ -3440,6 +3441,7 @@ function onAircraftChange() {
     infoText.style.color = 'var(--muted)';
     infoText.textContent = 'Bu araç henüz bir çağrı adına atanmamış';
   }
+  updateSortiButton();
 }
 
 // İkmal sayacı
@@ -3573,6 +3575,7 @@ function logEvent(type) {
   currentStatus = type === 'takeoff' ? 'airborne' : 'ground';
   updateStatusBadge(currentStatus);
   updateFlightButtons();
+  updateSortiButton();
 
   // Canlı sayaç ve ikmal butonu yönetimi
   if (type === 'takeoff') {
@@ -3580,9 +3583,11 @@ function logEvent(type) {
     startLiveTimer();
     ikmalUsed = false;
     updateIkmalButton();
+    // Kalkış — Firebase'e tekrar bağlan (kullanıcı rolü için)
+    if (currentUser?.role === 'user') fbReconnect();
   } else {
     stopLiveTimer();
-    ikmalUsed = false;   // inişten sonra ikmal aktif kalır
+    ikmalUsed = false;
     updateIkmalButton();
   }
 
@@ -3604,6 +3609,11 @@ function logEvent(type) {
       ...userCurrentStatus[currentUser.username],
       username: currentUser.username
     });
+
+    // İniş sonrası kullanıcı bağlantısını kes
+    if (type === 'landing' && currentUser?.role === 'user') {
+      setTimeout(() => fbStopUserListen(), 1500); // yazma tamamlansın diye 1.5sn bekle
+    }
   }
 
   // Toast
@@ -3646,6 +3656,35 @@ function logIkmalSafe() {
   logIkmal();
   ikmalUsed = true;
   updateIkmalButton();
+}
+
+function updateSortiButton() {
+  const btn = document.getElementById('sorti-btn');
+  const lbl = document.getElementById('sorti-sublabel');
+  if (!btn) return;
+
+  const todayStr = new Date().toLocaleDateString('tr-TR');
+  const aircraft = document.getElementById('aircraft-select')?.value;
+
+  // Bugün bu araç için kalkış veya iniş kaydı var mı?
+  const hasTodayLog = aircraft && allLogs.some(l =>
+    l.aircraft === aircraft &&
+    l.username === currentUser?.username &&
+    (l.type === 'takeoff' || l.type === 'landing') &&
+    l.date === todayStr
+  );
+
+  if (hasTodayLog) {
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    if (lbl) lbl.textContent = 'Her tıklama 1 sorti';
+  } else {
+    btn.disabled = true;
+    btn.style.opacity = '0.35';
+    btn.style.cursor = 'not-allowed';
+    if (lbl) lbl.textContent = 'Önce kalkış yapın';
+  }
 }
 
 function updateFlightButtons() {
@@ -4056,7 +4095,16 @@ function updateAdminPanel() {
           <div class="ac-status-reg">${s.aircraft}</div>
           <div class="ac-status-pilot">${s.name} · ${s.time}</div>
         </div>
-        <div class="ac-live-dot ${s.status === 'airborne' ? 'air' : 'gnd'}"></div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-left:auto">
+          <div class="ac-live-dot ${s.status === 'airborne' ? 'air' : 'gnd'}"></div>
+          <button onclick="adminToggleStatus('${uname}')" title="${s.status === 'airborne' ? 'İndir' : 'Uçur'}"
+            style="background:${s.status === 'airborne' ? 'rgba(255,107,53,0.15)' : 'rgba(0,230,118,0.15)'};
+            border:1px solid ${s.status === 'airborne' ? 'rgba(255,107,53,0.4)' : 'rgba(0,230,118,0.4)'};
+            color:${s.status === 'airborne' ? 'var(--accent2)' : 'var(--green)'};
+            border-radius:8px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:0.5px">
+            ${s.status === 'airborne' ? '⬇️ İndir' : '⬆️ Uçur'}
+          </button>
+        </div>
       </div>
     `).join('');
   }
@@ -4132,6 +4180,110 @@ function deleteLog(logId) {
   showToast('🗑️', 'Kayıt Silindi', `${lbl} — ${log.time}`, '#ff3d5a');
 }
 
+function adminDeleteLog(logId) {
+  const log = allLogs.find(l => l.id === logId);
+  if (!log) return;
+
+  // Silme öncesi kullanıcı durumunu yeniden hesapla
+  allLogs = allLogs.filter(l => l.id !== logId);
+
+  // Sayaçları güncelle
+  if (log.type === 'sorti') {
+    waterCounts[log.username] = Math.max(0, (waterCounts[log.username] || 0) - 1);
+  }
+  if (log.type === 'ikmal') {
+    ikmalCounts[log.username] = Math.max(0, (ikmalCounts[log.username] || 0) - 1);
+  }
+
+  // Kullanıcının güncel durumunu loglardan yeniden hesapla
+  recalcUserStatus(log.username);
+
+  // Firebase'den sil
+  if (db) fbRemove(`logs/${logId}`);
+
+  updateUserLog();
+  updateAdminPanel();
+  renderDurationTable();
+
+  const lbl = log.type === 'sorti' ? `Sorti #${log.sortiNo}`
+    : log.type === 'ikmal' ? `İkmal #${log.ikmalNo}`
+    : log.type === 'takeoff' ? 'Kalkış'
+    : log.type === 'landing' ? 'İniş'
+    : log.type;
+  showToast('🗑️', 'Kayıt Silindi', `${log.user} — ${lbl} ${log.time}`, '#ff3d5a');
+}
+
+// Kullanıcının durumunu tüm loglardan yeniden hesapla
+// Yönetici - araç durumunu manuel değiştir ve log ekle
+function adminToggleStatus(username) {
+  const s = userCurrentStatus[username];
+  if (!s) return;
+
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('tr-TR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  const dateStr = now.toLocaleDateString('tr-TR');
+  const newStatus = s.status === 'airborne' ? 'ground' : 'airborne';
+  const logType  = newStatus === 'ground' ? 'landing' : 'takeoff';
+
+  // Yeni log oluştur
+  const log = {
+    id: Date.now(),
+    user: s.name,
+    username,
+    aircraft: s.aircraft,
+    type: logType,
+    time: timeStr,
+    date: dateStr,
+    timestamp: now,
+    fire: null,
+    mission: null,
+    waterOnLanding: null,
+    editedBy: currentUser.name + ' (Yönetici)'
+  };
+
+  allLogs.unshift(log);
+
+  // Durumu güncelle
+  const updated = { ...s, status: newStatus, time: timeStr, username };
+  userCurrentStatus[username] = updated;
+
+  // Firebase'e yaz
+  if (db) {
+    db.ref(`logs/${log.id}`).set(toFirebase(log));
+    fbPush(`userStatus/${username}`, updated);
+  }
+
+  updateAdminPanel();
+  renderDurationTable();
+
+  const icon  = logType === 'landing' ? '⬇️' : '⬆️';
+  const label = logType === 'landing' ? 'İniş Kaydedildi' : 'Kalkış Kaydedildi';
+  showToast(icon, label, `${s.aircraft} — ${s.name} (Yönetici)`, logType === 'landing' ? 'var(--accent2)' : 'var(--green)');
+}
+
+function recalcUserStatus(username) {
+  const userLogs = allLogs
+    .filter(l => l.username === username && (l.type === 'takeoff' || l.type === 'landing'))
+    .sort((a, b) => b.id - a.id);
+
+  if (userLogs.length === 0) {
+    // Hiç log kalmadı — kullanıcıyı statüden kaldır
+    delete userCurrentStatus[username];
+    if (db) fbRemove(`userStatus/${username}`);
+  } else {
+    const lastLog = userLogs[0];
+    const newStatus = {
+      status: lastLog.type === 'takeoff' ? 'airborne' : 'ground',
+      aircraft: lastLog.aircraft,
+      time: lastLog.time,
+      name: lastLog.user,
+      username
+    };
+    userCurrentStatus[username] = newStatus;
+    if (db) fbPush(`userStatus/${username}`, newStatus);
+  }
+}
+
 function getMissionLabel(mission) {
   const map = { intikal: '🚁 İntikal', kesif: '🔍 Keşif', test: '🔧 Test' };
   return map[mission] || null;
@@ -4159,9 +4311,20 @@ function logItem(l, showUser = false, showEdit = false) {
     ? `<span style="font-size:9px;font-weight:700;letter-spacing:1px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.25);color:#f87171;padding:2px 6px;border-radius:5px;margin-left:4px">🔥 ${fireObj.name}</span>`
     : '';
 
-  // Sorti ve ikmal için sil butonu, diğerleri için düzenle butonu
+  // Buton mantığı
+  // - Yönetici: her kayıda hem düzenle hem sil
+  // - Kullanıcı: sorti/ikmal → sil, kalkış/iniş → düzenle
+  const isAdmin = currentUser?.role === 'admin';
   let actionBtn = '';
-  if (isSorti || isIkmal) {
+
+  if (isAdmin) {
+    // Yönetici — tüm kayıtlara sil butonu, kalkış/iniş için düzenle de var
+    const editBtn = (!isSorti && !isIkmal)
+      ? `<button class="log-edit-btn" onclick="openEditModal(${l.id})" title="Düzenle">✏️</button>`
+      : '';
+    const delBtn = `<button class="log-edit-btn" style="color:var(--red);border-color:rgba(255,61,90,0.3)" onclick="adminDeleteLog(${l.id})" title="Sil">🗑️</button>`;
+    actionBtn = editBtn + delBtn;
+  } else if (isSorti || isIkmal) {
     actionBtn = `<button class="log-edit-btn" style="color:var(--red);border-color:rgba(255,61,90,0.3)" onclick="deleteLog(${l.id})" title="Kaydı Sil">🗑️</button>`;
   } else if (showEdit) {
     actionBtn = `<button class="log-edit-btn" onclick="openEditModal(${l.id})" title="Saati düzenle">✏️</button>`;
@@ -4485,10 +4648,12 @@ function fbSyncAll() {
 }
 
 // ── Firebase'den canlı dinle ─────────────────────────────────
-function fbListenAll() {
+// Rol bazlı dinleme: admin/izleyici → hep açık | kullanıcı → sadece uçuşta
+
+function fbListenAdmin() {
+  // Yönetici ve izleyici için tam dinleme
   if (!db) return;
 
-  // Loglar
   db.ref('logs').on('value', snap => {
     const data = snap.val();
     if (!data) return;
@@ -4498,51 +4663,121 @@ function fbListenAll() {
     updateUserLog();
     updateAdminPanel();
     renderDurationTable();
+    updateSortiButton();
     if (currentUser?.role === 'izleyici') renderViewerStats();
   });
 
-  // Kullanıcı anlık durumları
   db.ref('userStatus').on('value', snap => {
     const data = snap.val();
-    if (data) {
-      userCurrentStatus = data;
-      updateAdminPanel();
-      renderDurationTable();
-      if (currentUser?.role === 'izleyici') renderViewerStats();
-    } else {
-      userCurrentStatus = {};
-      updateAdminPanel();
-    }
+    if (data) { userCurrentStatus = data; } else { userCurrentStatus = {}; }
+    updateAdminPanel();
+    renderDurationTable();
+    if (currentUser?.role === 'izleyici') renderViewerStats();
   });
 
-  // Yangınlar
   db.ref('fires').on('value', snap => {
     const data = snap.val();
-    if (data) {
-      fires = Object.values(data);
-      renderFireList();
-      loadFireSelect();
-      renderStatsCards();
-    }
+    if (data) { fires = Object.values(data); renderFireList(); loadFireSelect(); renderStatsCards(); }
   });
 
-  // Kullanıcılar
   db.ref('users').on('value', snap => {
     const data = snap.val();
     if (data) { USERS = data; renderUserList(); }
   });
 
-  // Çağrı adları
   db.ref('callsigns').on('value', snap => {
     const data = snap.val();
-    if (data) {
-      callsigns = data;
-      renderCallsignList();
-      if (currentUser) loadUserAircraftSelect(currentUser.username);
-    }
+    if (data) { callsigns = data; renderCallsignList(); if (currentUser) loadUserAircraftSelect(currentUser.username); }
   });
 
-  // Çevrimiçi/çevrimdışı — zaten initFirebase'de dinleniyor, burada tekrar ekleme
+  db.ref('.info/connected').on('value', snap => {
+    showConnectionStatus(snap.val() ? 'online' : 'offline');
+  });
+}
+
+function fbListenUser() {
+  // Normal kullanıcı için sadece uçuş sırasında log ve status dinle
+  if (!db) return;
+
+  db.ref('logs').on('value', snap => {
+    const data = snap.val();
+    if (!data) return;
+    const remote = Object.values(data).sort((a,b) => b.id - a.id);
+    remote.forEach(l => { if (l.timestamp && !(l.timestamp instanceof Date)) l.timestamp = new Date(l.timestamp); });
+    allLogs = remote;
+    updateUserLog();
+    updateSortiButton();
+  });
+
+  db.ref('.info/connected').on('value', snap => {
+    showConnectionStatus(snap.val() ? 'online' : 'offline');
+  });
+}
+
+function fbStopUserListen() {
+  // Kullanıcı inişten sonra bağlantıyı kes
+  if (!db) return;
+  db.ref('logs').off();
+  db.ref('.info/connected').off();
+  db.goOffline();
+  showConnectionStatus('offline');
+  console.info('[Firebase] Uçuş bitti, bağlantı kesildi (eş zamanlı limit koruması)');
+}
+
+function fbReconnect() {
+  // Kalkış öncesi tekrar bağlan
+  if (!db) return;
+  db.goOnline();
+  fbListenUser();
+  console.info('[Firebase] Kalkış, bağlantı açıldı');
+}
+
+function fbListenAll() {
+  // Geriye dönük uyumluluk — rol bazlı yönlendir
+  if (!db) return;
+  const role = currentUser?.role;
+  if (role === 'admin' || role === 'izleyici') {
+    fbListenAdmin();
+  } else {
+    // Kullanıcı — sadece bir kez verileri çek, bağlantıyı kes
+    fbFetchUserData();
+  }
+}
+
+function fbFetchUserData() {
+  // Kullanıcı giriş yapınca tek seferlik veri çek, sonra bağlantıyı kes
+  if (!db) return;
+  showConnectionStatus('syncing');
+
+  Promise.all([
+    db.ref('logs').once('value'),
+    db.ref('userStatus').once('value'),
+    db.ref('fires').once('value'),
+    db.ref('callsigns').once('value'),
+  ]).then(([logsSnap, statusSnap, firesSnap, csSnap]) => {
+    // Loglar
+    const logsData = logsSnap.val();
+    if (logsData) {
+      const remote = Object.values(logsData).sort((a,b) => b.id - a.id);
+      remote.forEach(l => { if (l.timestamp && !(l.timestamp instanceof Date)) l.timestamp = new Date(l.timestamp); });
+      allLogs = remote;
+      updateUserLog();
+      updateSortiButton();
+    }
+    // Status
+    if (statusSnap.val()) userCurrentStatus = statusSnap.val();
+    // Yangınlar
+    if (firesSnap.val()) { fires = Object.values(firesSnap.val()); loadFireSelect(); }
+    // Çağrı adları
+    if (csSnap.val()) { callsigns = csSnap.val(); loadUserAircraftSelect(currentUser.username); }
+
+    // Veri çekildi, bağlantıyı kes (eş zamanlı bağlantı sayısını düşür)
+    db.goOffline();
+    showConnectionStatus('offline');
+    console.info('[Firebase] Veriler yüklendi, bağlantı kesildi (uçuş başlayınca tekrar açılacak)');
+  }).catch(e => {
+    console.error('[Firebase] Veri çekme hatası:', e);
+  });
 }
 
 // ── Tek kayıt Firebase'e yaz (log, durum vb.) ────────────────
@@ -4694,6 +4929,61 @@ function fbCallsignsUpdated() {
 
 // ── Uygulama başladığında Firebase'i başlat ──────────────────
 initFirebase();
+
+// ── Otomatik Güncelleme Kontrolü ─────────────────────────────
+// Bu sayı her yeni versiyonda 1 artır → kullanıcılar otomatik bilgilendirilir
+const APP_VERSION = 1;
+const GITHUB_URL = 'https://tulpa03.github.io/havacilik-dairesi-gokhan/index.html';
+
+function checkForUpdate() {
+  fetch(GITHUB_URL + '?v=' + Date.now(), { cache: 'no-store' })
+    .then(r => r.text())
+    .then(html => {
+      const match = html.match(/const APP_VERSION = (\d+)/);
+      if (match) {
+        const remoteVersion = parseInt(match[1]);
+        if (remoteVersion > APP_VERSION) {
+          showUpdateBanner(remoteVersion);
+        }
+      }
+    })
+    .catch(() => {}); // sessizce hata yut
+}
+
+function showUpdateBanner(newVersion) {
+  // Zaten banner varsa gösterme
+  if (document.getElementById('update-banner')) return;
+
+  const banner = document.createElement('div');
+  banner.id = 'update-banner';
+  banner.style.cssText = `
+    position:fixed; bottom:80px; left:50%; transform:translateX(-50%);
+    background:linear-gradient(135deg,#00d4ff,#0ea5e9);
+    color:#000; font-family:'DM Sans',sans-serif; font-weight:700;
+    font-size:13px; padding:12px 20px; border-radius:14px;
+    box-shadow:0 8px 24px rgba(0,212,255,0.4);
+    z-index:99999; display:flex; align-items:center; gap:12px;
+    animation:fadeUp 0.4s ease; white-space:nowrap;
+  `;
+  banner.innerHTML = `
+    <span>🔄 Yeni güncelleme mevcut!</span>
+    <button onclick="location.reload(true)" style="
+      background:#000; color:#00d4ff; border:none; border-radius:8px;
+      padding:6px 14px; font-weight:700; font-size:12px; cursor:pointer;
+    ">Güncelle</button>
+    <button onclick="this.parentElement.remove()" style="
+      background:rgba(0,0,0,0.2); color:#000; border:none; border-radius:8px;
+      padding:6px 10px; font-weight:700; font-size:12px; cursor:pointer;
+    ">✕</button>
+  `;
+  document.body.appendChild(banner);
+}
+
+// Sayfa açılınca 3 saniye bekle sonra kontrol et
+setTimeout(checkForUpdate, 3000);
+
+// Her 5 dakikada bir kontrol et
+setInterval(checkForUpdate, 5 * 60 * 1000);
 </script>
 </body>
 </html>
