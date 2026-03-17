@@ -396,6 +396,37 @@
   }
   .btn-takeoff:disabled::before, .btn-landing:disabled::before { display: none; }
 
+  /* Basılı tutma progress bar */
+  .btn-hold-progress {
+    position: absolute;
+    bottom: 0; left: 0;
+    height: 4px;
+    width: 0%;
+    border-radius: 0 0 var(--radius) var(--radius);
+    background: rgba(255,255,255,0.6);
+    transition: none;
+    pointer-events: none;
+  }
+
+  /* ETA butonu */
+  .btn-eta {
+    background: linear-gradient(135deg, #6366f1, #4f46e5);
+    box-shadow: 0 8px 24px rgba(99,102,241,0.25);
+    color: #fff;
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    min-height: 64px;
+  }
+  .btn-eta::before { background: linear-gradient(135deg, #818cf8, #6366f1); }
+  .btn-eta-left { display:flex; align-items:center; gap:10px; }
+  .btn-eta-icon { font-size:24px; }
+  .btn-eta-label { font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:2px; }
+  .btn-eta-sub { font-size:11px; color:rgba(255,255,255,0.7); font-weight:500; }
+  .btn-eta-value { font-family:'DM Mono',monospace; font-size:22px; font-weight:700; color:#c7d2fe; letter-spacing:2px; }
+
   .btn-icon { font-size: 36px; }
 
   .btn-label {
@@ -2014,13 +2045,23 @@
     <!-- Action Buttons -->
     <div class="section-title">İşlem</div>
     <div class="action-grid">
-      <button class="action-btn btn-takeoff" id="takeoff-btn" onclick="logEvent('takeoff')">
-        <span class="btn-icon">⬆️</span><span class="btn-label" style="font-size:15px;letter-spacing:2px">KALKIŞ</span>
-        <span class="btn-sublabel">Butonuna bas</span>
+      <button class="action-btn btn-takeoff" id="takeoff-btn"
+        onmousedown="startHold('takeoff')" ontouchstart="startHold('takeoff')"
+        onmouseup="cancelHold()" onmouseleave="cancelHold()"
+        ontouchend="cancelHold()" ontouchcancel="cancelHold()" disabled>
+        <span class="btn-icon">⬆️</span>
+        <span class="btn-label" style="font-size:15px;letter-spacing:2px">KALKIŞ</span>
+        <span class="btn-sublabel" id="takeoff-sublabel">Butonuna bas</span>
+        <div class="btn-hold-progress" id="hold-progress-takeoff"></div>
       </button>
-      <button class="action-btn btn-landing" id="landing-btn" onclick="logEvent('landing')" disabled>
-        <span class="btn-icon">⬇️</span><span class="btn-label" style="font-size:15px;letter-spacing:2px">İNİŞ</span>
+      <button class="action-btn btn-landing" id="landing-btn"
+        onmousedown="startHold('landing')" ontouchstart="startHold('landing')"
+        onmouseup="cancelHold()" onmouseleave="cancelHold()"
+        ontouchend="cancelHold()" ontouchcancel="cancelHold()" disabled>
+        <span class="btn-icon">⬇️</span>
+        <span class="btn-label" style="font-size:15px;letter-spacing:2px">İNİŞ</span>
         <span class="btn-sublabel">Önce kalkış yapın</span>
+        <div class="btn-hold-progress" id="hold-progress-landing"></div>
       </button>
       <button class="action-btn btn-water" id="sorti-btn" onclick="logWater()" disabled style="opacity:0.35;cursor:not-allowed">
         <div class="btn-water-left">
@@ -2043,6 +2084,17 @@
           <span class="water-count-num" id="ikmal-count-display">0</span>
           <span class="water-count-lbl">Bu Uçuşta</span>
         </div>
+      </button>
+      <!-- ETA Butonu -->
+      <button class="action-btn btn-eta" onclick="openEtaModal()">
+        <div class="btn-eta-left">
+          <span class="btn-eta-icon">🕐</span>
+          <div>
+            <div class="btn-eta-label">ETA</div>
+            <div class="btn-eta-sub">Tahmini varış saati</div>
+          </div>
+        </div>
+        <div class="btn-eta-value" id="eta-display">— : —</div>
       </button>
     </div>
 
@@ -2274,6 +2326,17 @@
     </div>
 
     <!-- Filtre -->
+    <!-- Arşiv Tarihi Filtresi -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <span style="font-size:12px;color:var(--muted);font-weight:600;letter-spacing:1px">📅 TARİH</span>
+      <select id="archive-date-filter" onchange="loadArchiveDate(this.value)"
+        style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;outline:none">
+        <option value="today">Bugün</option>
+      </select>
+      <button onclick="loadArchiveDates()" title="Tarihleri yenile"
+        style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--muted);cursor:pointer;font-size:14px">🔄</button>
+    </div>
+
     <div class="section-title">Bildirim Akışı</div>
     <div class="filter-tabs">
       <button class="filter-btn active-all" id="filter-all" onclick="setFilter('all')">
@@ -2459,6 +2522,35 @@
 </div>
 
 <!-- ===== EDIT MODAL ===== -->
+<!-- ETA Modal -->
+<div class="modal-overlay" id="eta-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">🕐 ETA GİRİŞİ</div>
+      <button class="modal-close" onclick="closeEtaModal()">✕</button>
+    </div>
+    <div class="modal-info">
+      <span class="modal-info-icon">🚁</span>
+      <div class="modal-info-text">
+        <div class="modal-info-user" id="eta-aircraft-info">Araç</div>
+        <div class="modal-info-detail">Tahmini varış saatini girin</div>
+      </div>
+    </div>
+    <div class="modal-field" style="margin-bottom:16px">
+      <label>Tahmini Varış Saati (ETA)</label>
+      <input type="time" id="eta-time-input" step="60" />
+    </div>
+    <div class="modal-note" style="margin-bottom:16px">
+      <span>⏱</span>
+      <span>Bu bilgi yöneticilere ve izleyicilere anlık iletilir</span>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="clearEta()">Temizle</button>
+      <button class="btn-save" onclick="saveEta()">✓ Kaydet</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="edit-modal">
   <div class="modal">
     <div class="modal-header">
@@ -3712,21 +3804,168 @@ function updateSortiButton() {
   }
 }
 
+// ── 2 Saniye Basılı Tutma ────────────────────────────────────
+let holdTimer = null;
+let holdInterval = null;
+const HOLD_DURATION = 2000; // 2 saniye
+
+function startHold(type) {
+  const btn = document.getElementById(type === 'takeoff' ? 'takeoff-btn' : 'landing-btn');
+  const progress = document.getElementById(`hold-progress-${type}`);
+  if (!btn || btn.disabled) return;
+
+  let elapsed = 0;
+  const step = 50;
+
+  if (progress) { progress.style.width = '0%'; progress.style.transition = 'none'; }
+
+  holdInterval = setInterval(() => {
+    elapsed += step;
+    const pct = Math.min((elapsed / HOLD_DURATION) * 100, 100);
+    if (progress) progress.style.width = pct + '%';
+
+    if (elapsed >= HOLD_DURATION) {
+      cancelHold();
+      logEvent(type);
+    }
+  }, step);
+}
+
+function cancelHold() {
+  if (holdInterval) { clearInterval(holdInterval); holdInterval = null; }
+  ['takeoff', 'landing'].forEach(t => {
+    const p = document.getElementById(`hold-progress-${t}`);
+    if (p) { p.style.width = '0%'; }
+  });
+}
+
+// ── ETA ──────────────────────────────────────────────────────
+let currentEta = null;
+
+function openEtaModal() {
+  const aircraft = document.getElementById('aircraft-select')?.value || '—';
+  document.getElementById('eta-aircraft-info').textContent = aircraft;
+  if (currentEta) document.getElementById('eta-time-input').value = currentEta;
+  document.getElementById('eta-modal').classList.add('open');
+}
+
+function closeEtaModal() {
+  document.getElementById('eta-modal').classList.remove('open');
+}
+
+function saveEta() {
+  const val = document.getElementById('eta-time-input').value;
+  if (!val) { showToast('⚠️', 'Saat Girin', 'ETA saati boş olamaz', '#ffd700'); return; }
+  currentEta = val;
+  document.getElementById('eta-display').textContent = val;
+
+  // Firebase'e yaz
+  if (db && currentUser) {
+    db.ref(`userStatus/${currentUser.username}/eta`).set(val);
+  }
+
+  closeEtaModal();
+  showToast('🕐', 'ETA Kaydedildi', val, '#6366f1');
+}
+
+function clearEta() {
+  currentEta = null;
+  document.getElementById('eta-display').textContent = '— : —';
+  document.getElementById('eta-time-input').value = '';
+  if (db && currentUser) db.ref(`userStatus/${currentUser.username}/eta`).remove();
+  closeEtaModal();
+  showToast('🕐', 'ETA Temizlendi', '', '#6b7a94');
+}
+
+document.getElementById('eta-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeEtaModal();
+});
+
+// ── Günlük Sıfırlama & Arşiv ────────────────────────────────
+function getTodayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function archiveAndReset() {
+  if (!db) return;
+  const todayKey = getTodayKey();
+
+  // Bugünkü logları arşivle
+  db.ref('logs').once('value', snap => {
+    const data = snap.val();
+    if (data && Object.keys(data).length > 0) {
+      db.ref(`archive/${todayKey}/logs`).set(data);
+      db.ref(`archive/${todayKey}/archivedAt`).set(new Date().toISOString());
+    }
+
+    // Logları ve durumları sıfırla
+    db.ref('logs').set({});
+    db.ref('userStatus').set({});
+
+    // Lokal state sıfırla
+    allLogs = [];
+    userCurrentStatus = {};
+    waterCounts = {};
+    ikmalCounts = {};
+    currentEta = null;
+    document.getElementById('eta-display').textContent = '— : —';
+    currentStatus = 'ground';
+    updateStatusBadge('ground');
+    updateFlightButtons();
+    updateIkmalButton();
+    updateSortiButton();
+    updateUserLog();
+    updateAdminPanel();
+
+    showToast('🔄', 'Günlük Sıfırlama', `${todayKey} arşivlendi`, 'var(--accent)');
+    console.info('[Arşiv] Sıfırlama tamamlandı:', todayKey);
+  });
+}
+
+function checkDailyReset() {
+  if (!db) return;
+  const todayKey = getTodayKey();
+  db.ref('system/lastResetDate').once('value', snap => {
+    const lastReset = snap.val();
+    if (lastReset !== todayKey) {
+      db.ref('system/lastResetDate').set(todayKey);
+      if (lastReset) { // İlk çalıştırma değilse sıfırla
+        archiveAndReset();
+      }
+    }
+  });
+}
+
+// ── Uygulama başladığında Firebase'i başlat ──────────────────
+initFirebase();
+  const now = new Date();
+  const midnight = new Date(now);
+  midnight.setHours(24, 0, 0, 0);
+  const msUntilMidnight = midnight - now;
+
+  setTimeout(() => {
+    checkDailyReset();
+    // Sonraki gece için tekrar planla
+    setInterval(checkDailyReset, 24 * 60 * 60 * 1000);
+  }, msUntilMidnight);
+
+  console.info('[Sıfırlama] Gece yarısına kalan:', Math.round(msUntilMidnight/1000/60), 'dakika');
+}
+
 function updateFlightButtons() {
   const takeoffBtn = document.getElementById('takeoff-btn');
   const landingBtn = document.getElementById('landing-btn');
   if (!takeoffBtn || !landingBtn) return;
 
   if (currentStatus === 'airborne') {
-    // Havada → Kalkış deaktif, İniş aktif
     takeoffBtn.disabled = true;
     takeoffBtn.querySelector('.btn-sublabel').textContent = 'Önce iniş yapın';
     landingBtn.disabled = false;
-    landingBtn.querySelector('.btn-sublabel').textContent = 'Butonuna bas';
+    landingBtn.querySelector('.btn-sublabel').textContent = '2sn basılı tut';
   } else {
-    // Yerde → Kalkış aktif, İniş deaktif
     takeoffBtn.disabled = false;
-    takeoffBtn.querySelector('.btn-sublabel').textContent = 'Butonuna bas';
+    takeoffBtn.querySelector('.btn-sublabel').textContent = '2sn basılı tut';
     landingBtn.disabled = true;
     landingBtn.querySelector('.btn-sublabel').textContent = 'Önce kalkış yapın';
   }
@@ -4951,8 +5190,59 @@ function fbCallsignsUpdated() {
   removeUserFromCs = function(id, u) { _removeUserFromCs(id, u); fbCallsignsUpdated(); };
 })();
 
-// ── Uygulama başladığında Firebase'i başlat ──────────────────
-initFirebase();
+// ── Arşiv Görüntüleme ────────────────────────────────────────
+function loadArchiveDates() {
+  if (!db) return;
+  const sel = document.getElementById('archive-date-filter');
+  if (!sel) return;
+
+  db.ref('archive').once('value', snap => {
+    const data = snap.val();
+    const todayKey = getTodayKey();
+    sel.innerHTML = `<option value="today">Bugün (${todayKey})</option>`;
+    if (data) {
+      Object.keys(data).sort().reverse().forEach(dateKey => {
+        const opt = document.createElement('option');
+        opt.value = dateKey;
+        opt.textContent = dateKey;
+        sel.appendChild(opt);
+      });
+    }
+  });
+}
+
+function loadArchiveDate(val) {
+  if (val === 'today') {
+    // Bugünkü canlı verileri göster
+    renderAdminLog();
+    return;
+  }
+  if (!db) return;
+
+  db.ref(`archive/${val}/logs`).once('value', snap => {
+    const data = snap.val();
+    if (!data) {
+      document.getElementById('admin-log-list').innerHTML =
+        '<div class="log-empty"><div class="log-empty-icon">📅</div>Bu tarihte kayıt yok</div>';
+      return;
+    }
+    const logs = Object.values(data).sort((a,b) => b.id - a.id);
+    logs.forEach(l => { if (l.timestamp) l.timestamp = new Date(l.timestamp); });
+    const adminList = document.getElementById('admin-log-list');
+    adminList.innerHTML = logs.map(l => logItem(l, true, false)).join('');
+  });
+}
+
+// initFirebase'e checkDailyReset ekle
+const _origFbSyncAll = fbSyncAll;
+fbSyncAll = function() {
+  _origFbSyncAll();
+  setTimeout(() => {
+    checkDailyReset();
+    scheduleMidnightReset();
+    loadArchiveDates();
+  }, 2000);
+};
 
 // ── Otomatik Güncelleme Kontrolü ─────────────────────────────
 // Bu sayı her yeni versiyonda 1 artır → kullanıcılar otomatik bilgilendirilir
