@@ -2623,28 +2623,18 @@
 
 <script>
 // Demo kullanıcı veritabanı (dinamik)
-let USERS = {
-  'ahmet': { password: '1234', name: 'Ahmet Yılmaz', role: 'user' },
-  'mehmet': { password: '1234', name: 'Mehmet Demir', role: 'user' },
-  'ayse': { password: '1234', name: 'Ayşe Kaya', role: 'user' },
-  'ali': { password: '1234', name: 'Ali Çelik', role: 'user' },
-  'admin': { password: 'admin123', name: 'Yönetici', role: 'admin' },
-};
-
-// Şifre görünürlük durumu
+// Tüm veriler Firebase'den gelir — demo veri yok
+let USERS = {};
 let passVisible = {};
 
-// ===== ÇAĞRI ADLARI VERİSİ =====
-// { id: { name, desc, tails: [] } }
-let callsigns = {
-  'cs1': { name: 'ORTA011', desc: 'ADANA', tails: ['RA-00011'], users: [] },
-  'cs2': { name: 'ORTA172', desc: 'KEŞAN', tails: ['RA-00172'], users: [] },
-};
-let csIdCounter = 3;
+// Çağrı adları — Firebase'den yüklenir
+let callsigns = {};
+let csIdCounter = 1;
 
-// Yangın listesi
+// Yangın listesi — Firebase'den yüklenir
 let fires = [];
 let fireIdCounter = 1;
+
 
 function addCallsign() {
   const name = document.getElementById('new-callsign').value.trim().toUpperCase();
@@ -4890,45 +4880,70 @@ function showConnectionStatus(status) {
   }
 }
 
-// ── Firebase'e TÜM veriyi yaz (sadece Firebase boşsa) ──────────────
+// ── Firebase'den verileri yükle (asla üzerine yazma) ──────────
 function fbSyncAll() {
   if (!db) return;
   showConnectionStatus('syncing');
 
-  // Önce kullanıcıları yükle, sonra diğer her şeyi yap
-  db.ref('users').once('value', snap => {
-    if (!snap.val()) {
-      db.ref('users').set(USERS);
-    } else {
-      USERS = snap.val();
+  // Tüm verileri paralel yükle
+  Promise.all([
+    db.ref('users').once('value'),
+    db.ref('callsigns').once('value'),
+    db.ref('fires').once('value'),
+    db.ref('logs').once('value'),
+    db.ref('userStatus').once('value'),
+  ]).then(([usersSnap, csSnap, firesSnap, logsSnap, statusSnap]) => {
+
+    // Kullanıcılar
+    if (usersSnap.val()) {
+      USERS = usersSnap.val();
       console.info('[Firebase] Kullanıcılar yüklendi:', Object.keys(USERS).length);
+    } else {
+      // Firebase tamamen boş — ilk kurulum, sadece admin yaz
+      USERS = { 'admin': { password: 'admin123', name: 'Yönetici', role: 'admin' } };
+      db.ref('users').set(USERS);
+      console.info('[Firebase] İlk kurulum — admin oluşturuldu');
     }
 
-    // Diğer verileri yükle
-    db.ref('callsigns').once('value', csSnap => {
-      if (!csSnap.val()) db.ref('callsigns').set(callsigns);
-      else callsigns = csSnap.val();
-    });
-    db.ref('fires').once('value', fSnap => {
-      if (!fSnap.val()) db.ref('fires').set({});
-      else { fires = Object.values(fSnap.val()); }
-    });
-    db.ref('logs').once('value', lSnap => {
-      if (!lSnap.val()) db.ref('logs').set({});
-    });
-    db.ref('userStatus').once('value', sSnap => {
-      if (!sSnap.val()) db.ref('userStatus').set({});
-    });
+    // Çağrı adları
+    if (csSnap.val()) {
+      callsigns = csSnap.val();
+      // csIdCounter'ı mevcut max id'den devam ettir
+      const ids = Object.keys(callsigns).map(k => parseInt(k.replace('cs',''))).filter(n => !isNaN(n));
+      if (ids.length) csIdCounter = Math.max(...ids) + 1;
+    }
+
+    // Yangınlar
+    if (firesSnap.val()) {
+      fires = Object.values(firesSnap.val());
+      const fIds = fires.map(f => parseInt(f.id?.replace('f',''))).filter(n => !isNaN(n));
+      if (fIds.length) fireIdCounter = Math.max(...fIds) + 1;
+    }
+
+    // Loglar
+    if (logsSnap.val()) {
+      const remote = Object.values(logsSnap.val()).sort((a,b) => b.id - a.id);
+      remote.forEach(l => { if (l.timestamp) l.timestamp = new Date(l.timestamp); });
+      allLogs = remote;
+    }
+
+    // Kullanıcı durumları
+    if (statusSnap.val()) userCurrentStatus = statusSnap.val();
 
     showConnectionStatus('online');
 
-    // Kullanıcılar yüklendikten sonra otomatik giriş dene
+    // Veriler yüklendi — otomatik giriş dene
     if (!currentUser) {
       const didLogin = tryAutoLogin();
-      if (didLogin) {
-        console.info('[Firebase] Otomatik giriş başarılı');
+      if (!didLogin) {
+        // Giriş yapılmadıysa login ekranında göster
+        document.getElementById('login-screen').style.display = 'flex';
       }
     }
+
+  }).catch(e => {
+    console.error('[Firebase] Yükleme hatası:', e);
+    showConnectionStatus('error');
   });
 }
 
@@ -4962,7 +4977,12 @@ function fbListenAdmin() {
 
   db.ref('fires').on('value', snap => {
     const data = snap.val();
-    if (data) { fires = Object.values(data); renderFireList(); loadFireSelect(); renderStatsCards(); }
+    if (data) {
+      fires = Object.values(data);
+      const fIds = fires.map(f => parseInt(f.id?.replace('f',''))).filter(n => !isNaN(n));
+      if (fIds.length) fireIdCounter = Math.max(...fIds) + 1;
+      renderFireList(); loadFireSelect(); renderStatsCards();
+    }
   });
 
   db.ref('users').on('value', snap => {
@@ -4972,7 +4992,13 @@ function fbListenAdmin() {
 
   db.ref('callsigns').on('value', snap => {
     const data = snap.val();
-    if (data) { callsigns = data; renderCallsignList(); if (currentUser) loadUserAircraftSelect(currentUser.username); }
+    if (data) {
+      callsigns = data;
+      const ids = Object.keys(callsigns).map(k => parseInt(k.replace('cs',''))).filter(n => !isNaN(n));
+      if (ids.length) csIdCounter = Math.max(...ids) + 1;
+      renderCallsignList();
+      if (currentUser) loadUserAircraftSelect(currentUser.username);
+    }
   });
 
   db.ref('.info/connected').on('value', snap => {
@@ -5038,18 +5064,26 @@ function fbFetchUserData() {
     db.ref('fires').once('value'),
     db.ref('callsigns').once('value'),
   ]).then(([logsSnap, statusSnap, firesSnap, csSnap]) => {
-    const logsData = logsSnap.val();
-    if (logsData) {
-      const remote = Object.values(logsData).sort((a,b) => b.id - a.id);
-      remote.forEach(l => { if (l.timestamp && !(l.timestamp instanceof Date)) l.timestamp = new Date(l.timestamp); });
+    if (logsSnap.val()) {
+      const remote = Object.values(logsSnap.val()).sort((a,b) => b.id - a.id);
+      remote.forEach(l => { if (l.timestamp) l.timestamp = new Date(l.timestamp); });
       allLogs = remote;
       updateUserLog();
       updateSortiButton();
     }
     if (statusSnap.val()) userCurrentStatus = statusSnap.val();
-    if (firesSnap.val()) { fires = Object.values(firesSnap.val()); loadFireSelect(); }
-    if (csSnap.val()) { callsigns = csSnap.val(); if (currentUser) loadUserAircraftSelect(currentUser.username); }
-
+    if (firesSnap.val()) {
+      fires = Object.values(firesSnap.val());
+      const fIds = fires.map(f => parseInt(f.id?.replace('f',''))).filter(n => !isNaN(n));
+      if (fIds.length) fireIdCounter = Math.max(...fIds) + 1;
+      loadFireSelect();
+    }
+    if (csSnap.val()) {
+      callsigns = csSnap.val();
+      const ids = Object.keys(callsigns).map(k => parseInt(k.replace('cs',''))).filter(n => !isNaN(n));
+      if (ids.length) csIdCounter = Math.max(...ids) + 1;
+      if (currentUser) loadUserAircraftSelect(currentUser.username);
+    }
     console.info('[Firebase] Kullanıcı verileri yüklendi');
   }).catch(e => {
     console.error('[Firebase] Veri çekme hatası:', e);
