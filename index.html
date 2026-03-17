@@ -3370,10 +3370,17 @@ function doLogin() {
     return;
   }
 
+  // Oturumu localStorage'a kaydet
+  localStorage.setItem('hd_session', JSON.stringify({ username: uname, password: pass }));
+
+  applyLogin(uname, user);
+  showToast('👋', 'Hoş Geldin!', user.name, 'var(--accent)');
+}
+
+function applyLogin(uname, user) {
   currentUser = { username: uname, ...user };
   document.getElementById('login-screen').style.display = 'none';
 
-  // Header bilgilerini her rol için hazırla (admin de panel'e geçebilir)
   document.getElementById('header-username').textContent = user.name.split(' ')[0];
   document.getElementById('avatar-letter').textContent = user.name[0];
 
@@ -3392,8 +3399,25 @@ function doLogin() {
     loadFireSelect();
     updateUserLog();
   }
+}
 
-  showToast('👋', 'Hoş Geldin!', user.name, 'var(--accent)');
+// Sayfa yüklenince oturumu kontrol et
+function tryAutoLogin() {
+  try {
+    const saved = localStorage.getItem('hd_session');
+    if (!saved) return false;
+    const { username, password } = JSON.parse(saved);
+    const user = USERS[username];
+    if (!user || user.password !== password) {
+      localStorage.removeItem('hd_session');
+      return false;
+    }
+    applyLogin(username, user);
+    return true;
+  } catch (e) {
+    localStorage.removeItem('hd_session');
+    return false;
+  }
 }
 
 function shakeInput() {
@@ -3410,6 +3434,7 @@ function doLogout() {
   stopLiveTimer();
   stopViewerRefresh();
   ikmalUsed = false;
+  localStorage.removeItem('hd_session');
   ['main-screen','admin-screen','data-screen','viewer-screen'].forEach(id => {
     const el = document.getElementById(id); if (el) el.style.display = 'none';
   });
@@ -4550,6 +4575,9 @@ function initFirebase() {
   console.info('[Firebase] apiKey:', FIREBASE_CONFIG.apiKey.substring(0,12) + '...');
   console.info('[Firebase] databaseURL:', FIREBASE_CONFIG.databaseURL);
 
+  // Demo modda da otomatik girişi dene
+  setTimeout(() => { if (!currentUser) tryAutoLogin(); }, 500);
+
   // Firebase SDK'yı dinamik yükle
   const sdkScript = document.createElement('script');
   sdkScript.src = 'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js';
@@ -4621,13 +4649,13 @@ function fbSyncAll() {
   // Kullanıcılar — Firebase'dekini koru, asla üzerine yazma
   db.ref('users').once('value', snap => {
     if (!snap.val()) {
-      // Firebase boş — sadece o zaman demo kullanıcıları yaz
       db.ref('users').set(USERS);
     } else {
-      // Firebase'de kullanıcı var — JS'deki USERS'ı Firebase'dekiyle güncelle
       USERS = snap.val();
-      console.info('[Firebase] Kullanıcılar Firebase\'den yüklendi:', Object.keys(USERS).length, 'kullanıcı');
+      console.info('[Firebase] Kullanıcılar yüklendi:', Object.keys(USERS).length);
     }
+    // Kullanıcılar yüklendikten sonra otomatik girişi dene
+    if (!currentUser) tryAutoLogin();
   });
 
   // Diğer veriler — sadece Firebase boşsa yaz
